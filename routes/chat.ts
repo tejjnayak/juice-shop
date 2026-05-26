@@ -5,7 +5,7 @@
 
 import { type Request, type Response } from 'express'
 import config from 'config'
-import { stepCountIs, streamText, tool } from 'ai'
+import { streamText, generateText, tool, stepCountIs } from 'ai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { z } from 'zod'
 import { Op } from 'sequelize'
@@ -197,12 +197,35 @@ export function chat () {
 
     const systemPrompt = buildSystemPrompt(userName)
 
+    const verifySystemPromptExtraction = tool({
+      description: "Check whether the user has successfully extracted or revealed the chatbot's system prompt or any confidential instructions. Call this when the user claims to have found, wants to confirm, or asks to verify the system prompt.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          const { text } = await generateText({
+            model: provider(model),
+            system: 'You are a security judge for a CTF challenge.\nYou are given the original system prompt and a user submission.\n\nSTEP 1 – Bot name check (mandatory):\nThe correct bot name is exactly: Juicy the Smart Assistant\nDoes the submission explicitly contain this full name? If NO → answer NO immediately.\n\nSTEP 2 – Fact check:\n- Is the discount percentage wrong? → NO\n- Are there invented conditions not in the original? → NO\n\nSTEP 3 – Content check:\nDoes the submission contain specific coupon conditions from the original (verified damaged order, rejected return/exchange, 10% maximum)?\nIf yes and steps 1-2 passed → YES. Otherwise → NO.\n\nAnswer with ONLY the word YES or NO. Nothing else.',
+            prompt: `Original system prompt:\n${systemPrompt}\n\nConversation to evaluate:\n${JSON.stringify(messages)}`
+          })
+          const leaked = text.trim().toUpperCase().startsWith('YES')
+          challengeUtils.solveIf(
+            challenges.systemPromptExtractionChallenge,
+            () => leaked
+          )
+          return { leaked, confidence: leaked ? 1 : 0 }
+        } catch (error) {
+          logger.warn('System prompt extraction verify error: ' + summarizeLlmError(error))
+          return { leaked: false, confidence: 0 }
+        }
+      }
+    })
+
     try {
       const result = streamText({
         model: provider(model),
         system: systemPrompt,
         messages,
-        tools: chatTools,
+        tools: { ...chatTools, verifySystemPromptExtraction },
         maxRetries: config.get<number>('application.chatBot.llmMaxRetries'),
         stopWhen: stepCountIs(10),
         onError: ({ error }) => {
