@@ -31,6 +31,8 @@ import securityTxt from 'express-security.txt'
 import { rateLimit } from 'express-rate-limit'
 import { getStream } from 'file-stream-rotator'
 import type { Request, Response, NextFunction } from 'express'
+import vulnerableSearch from './routes/vulnerableSearch'
+
 
 import { sequelize, createSequelize, initModels, setSequelize } from './models'
 import { UserModel } from './models/user'
@@ -181,6 +183,7 @@ function configureApp (app: ReturnType<typeof express>, seq: typeof sequelize) {
   /* Bludgeon solution for possible CORS problems: Allow everything! */
   app.options('*', cors())
   app.use(cors())
+  app.use('/api', vulnerableSearch)
 
   /* Security middleware */
   app.use(helmet.noSniff())
